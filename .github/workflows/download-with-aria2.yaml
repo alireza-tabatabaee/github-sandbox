@@ -14,8 +14,13 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install aria2
-        run: sudo apt-get install -y aria2
+      - name: Install aria2 and yt-dlp
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y aria2
+          sudo apt-get install -y ffmpeg
+          sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
+          sudo chmod a+rx /usr/local/bin/yt-dlp
 
       - name: Extract URLs and download files
         run: |
@@ -28,6 +33,9 @@ jobs:
           elif echo "$MSG" | grep -qP 'download:'; then
             MODE="normal"
             URL_LINE=$(echo "$MSG" | grep -oP 'download:\s*\K.*')
+          elif echo "$MSG" | grep -qP 'youtube:'; then
+            MODE="youtube"
+            URL_LINE=$(echo "$MSG" | grep -oP 'youtube:\s*\K.*')
           else
             echo "❌ No download command found in commit message"
             exit 1
@@ -37,15 +45,23 @@ jobs:
           mkdir -p downloads tmp_downloads
 
           for URL in $URL_LINE; do
-            FILENAME=$(basename "$URL")
-            echo "⬇️ Downloading $URL -> $FILENAME"
-
-            aria2c \
-              --split=2 \
-              --max-connection-per-server=2 \
-              --min-split-size=90M \
-              --dir="tmp_downloads" \
-              "$URL"
+            if [ "$MODE" = "youtube" ]; then
+              echo "📺 Downloading YouTube video $URL at 720p with sound"
+              # Download best 720p video + best audio, merge with ffmpeg
+              yt-dlp -f "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720]/best" \
+                     --merge-output-format mp4 \
+                     -o "tmp_downloads/%(title)s.%(ext)s" \
+                     "$URL"
+            else
+              FILENAME=$(basename "$URL")
+              echo "⬇️ Downloading $URL -> $FILENAME"
+              aria2c \
+                --split=2 \
+                --max-connection-per-server=2 \
+                --min-split-size=90M \
+                --dir="tmp_downloads" \
+                "$URL"
+            fi
           done
 
           if [ "$MODE" = "zip" ]; then
